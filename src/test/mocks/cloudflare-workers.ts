@@ -1,0 +1,27 @@
+/**
+ * Mock of the `cloudflare:workers` module used during Vitest runs in Node.
+ *
+ * This file is intentionally excluded from `tsconfig` (it is not part of the
+ * Worker bundle) and only executed through esbuild inside Vitest. It mirrors
+ * the runtime `env` shape so `getEnv()` works under test.
+ */
+export const env = {
+  NODE_ENV: "test",
+  APP_NAME: "get-image-api-test",
+  LOG_LEVEL: "silent",
+  API_PREFIX: "/api",
+  CORS_ORIGIN: "*",
+  RATE_LIMIT_MAX: "1000",
+  RATE_LIMIT_WINDOW_MS: "60000",
+};
+
+export const ctx = {
+  waitUntil: (_promise: Promise<unknown>): void => {
+    /* no-op in tests */
+  },
+  passThroughOnException: (): void => {
+    /* no-op in tests */
+  },
+};
+
+export const caches = undefined as unknown as CacheStorage;
