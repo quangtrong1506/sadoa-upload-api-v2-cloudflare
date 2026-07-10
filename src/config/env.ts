@@ -11,15 +11,20 @@ import { z } from "zod";
  */
 export const envSchema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
-  APP_NAME: z.string().min(1).default("get-image-api"),
+  APP_NAME: z.string().min(1).default("sadoa-upload-api-v2-cloudflare"),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
   API_PREFIX: z.string().min(1).default("/api"),
   CORS_ORIGIN: z.string().default("*"),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
 
-  // API key required by the image upload endpoint.
-  X_API_KEY: z.string().min(1).default("dev_api_key"),
+  // API key required by the image upload endpoint. An empty/missing var is
+  // treated as "not provided" and falls back to the dev default instead of
+  // failing validation (Cloudflare `vars` default to an empty string).
+  X_API_KEY: z.preprocess(
+    (v) => (v === "" || v === undefined ? "dev_api_key" : v),
+    z.string().min(1),
+  ),
   // Telegram bot credentials used as the image store. Optional so the Worker
   // still boots when image features are not configured.
   TELEGRAM_BOT_TOKEN: z.string().optional(),

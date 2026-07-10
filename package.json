@@ -1,5 +1,5 @@
 {
-  "name": "get-image-api",
+  "name": "sadoa-upload-api-v2-cloudflare",
   "version": "1.0.0",
   "description": "Production-ready Express.js backend running on Cloudflare Workers",
   "type": "module",

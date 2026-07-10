@@ -7,7 +7,7 @@
  */
 export const env = {
   NODE_ENV: "test",
-  APP_NAME: "get-image-api-test",
+  APP_NAME: "sadoa-upload-api-v2-cloudflare-test",
   LOG_LEVEL: "silent",
   API_PREFIX: "/api",
   CORS_ORIGIN: "*",
