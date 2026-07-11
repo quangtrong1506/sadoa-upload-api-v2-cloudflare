@@ -1,12 +1,15 @@
 import cors from "cors";
 import express, { type Express } from "express";
 import helmet from "helmet";
-import { getEnv } from "./config/env";
-import { registerRoutes } from "./api/routes";
-import { requestLogger } from "./api/middleware/request-logger";
+import { randomBytes } from "node:crypto";
 import { errorHandler } from "./api/middleware/error-handler";
 import { notFoundHandler } from "./api/middleware/not-found";
 import { createRateLimiter } from "./api/middleware/rate-limit";
+import { requestLogger } from "./api/middleware/request-logger";
+import { registerRoutes } from "./api/routes";
+import imageGetRouter from "./api/routes/image-get.route";
+import { getEnv } from "./config/env";
+import { registerDocsRoutes } from "./docs/swagger";
 import { logger } from "./utils/logger";
 
 /**
@@ -23,8 +26,41 @@ export function createApp(): Express {
 
   app.set("trust proxy", 1);
 
-  // Security & standard headers.
-  app.use(helmet());
+  // Per-request CSP nonce for the inline scripts/styles on the docs page.
+  app.use((_req, res, next) => {
+    res.locals.nonce = randomBytes(16).toString("base64");
+    next();
+  });
+
+  // Security & standard headers. The CSP is relaxed enough to allow the Swagger
+  // UI assets that are served from the unpkg CDN on the /docs page, while still
+  // gating inline scripts behind a per-request nonce.
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        useDefaults: true,
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: [
+            "'self'",
+            "https://unpkg.com",
+            (_req, res) => `'nonce-${(res as import("express").Response).locals.nonce}'`,
+          ],
+          scriptSrcElem: [
+            "'self'",
+            "https://unpkg.com",
+            (_req, res) => `'nonce-${(res as import("express").Response).locals.nonce}'`,
+          ],
+          styleSrc: ["'self'", "https://unpkg.com", "'unsafe-inline'"],
+          styleSrcElem: ["'self'", "https://unpkg.com", "'unsafe-inline'"],
+          imgSrc: ["'self'", "data:", "https://unpkg.com", "https:"],
+          fontSrc: ["'self'", "https://unpkg.com", "data:"],
+          connectSrc: ["'self'", "https://unpkg.com"],
+          workerSrc: ["'self'", "blob:"],
+        },
+      },
+    }),
+  );
 
   // CORS. `*` keeps a permissive default; otherwise build an allow-list.
   const allowedOrigins = env.CORS_ORIGIN.split(",").map((o) => o.trim());
@@ -36,7 +72,7 @@ export function createApp(): Express {
   );
 
   // Body parsing.
-  app.use(express.json({ limit: "1mb" }));
+  app.use(express.json({ limit: "3mb" }));
   app.use(express.urlencoded({ extended: true }));
 
   // Observability: structured request logging + in-memory rate limiting.
@@ -50,6 +86,12 @@ export function createApp(): Express {
 
   // Routes mounted under the configured API prefix (e.g. /api).
   app.use(env.API_PREFIX, registerRoutes(env.API_PREFIX));
+
+  // Public image retrieval, served from the root `/images` path (no /api prefix).
+  app.use("/images", imageGetRouter);
+
+  // OpenAPI documentation (mounted outside the API prefix).
+  app.use(registerDocsRoutes());
 
   // 404 + central error handling (order matters: not-found first, then handler).
   app.use(notFoundHandler);

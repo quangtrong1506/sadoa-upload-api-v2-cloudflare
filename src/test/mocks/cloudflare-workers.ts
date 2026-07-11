@@ -13,6 +13,8 @@ export const env = {
   CORS_ORIGIN: "*",
   RATE_LIMIT_MAX: "1000",
   RATE_LIMIT_WINDOW_MS: "60000",
+  TELEGRAM_BOT_TOKEN: "test_bot_token",
+  TELEGRAM_CHAT_ID: "123456789",
 };
 
 export const ctx = {

@@ -136,12 +136,13 @@ after changing bindings so `worker-configuration.d.ts` stays in sync.
 ## Image API
 
 Images are stored in a Telegram chat (used as a free object store) and served
-back through the Worker. Two endpoints are mounted under `/api/images`:
+back through the Worker. Upload is mounted under `/api/images`; image retrieval
+is served from the root `/images` path (no API prefix).
 
 | Method | Path                   | Auth            | Description                                              |
 | ------ | ---------------------- | --------------- | -------------------------------------------------------- |
 | POST   | `/api/images/upload`   | `x-api-key`     | Multipart `image` upload (max 10 MB, image MIME only).   |
-| GET    | `/api/images/:id`      | public          | Streams the stored image bytes with long cache headers.  |
+| GET    | `/images/:id`          | public          | Streams the stored image bytes with long cache headers.  |
 
 Example:
 
@@ -152,7 +153,7 @@ curl -X POST http://localhost:8787/api/images/upload \
   -F "image=@./photo.png"
 
 # Retrieve
-curl http://localhost:8787/api/images/<file_id>
+curl http://localhost:8787/images/<file_id>
 ```
 
 Configuration (in `wrangler.jsonc` `vars` / secrets):

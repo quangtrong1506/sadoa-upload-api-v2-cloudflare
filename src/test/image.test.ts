@@ -2,19 +2,33 @@ import { describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import app from "../app";
 
-vi.mock("../services/telegram.service", () => ({
+vi.mock("../services/telegram", () => ({
   telegramService: {
-    uploadImage: vi.fn(async () => [
-      { file_id: "id_large", file_unique_id: "u1", width: 1280, height: 720 },
-      { file_id: "id_small", file_unique_id: "u2", width: 320, height: 180 },
+    sendPhoto: vi.fn(async () => ({
+      message_id: 1,
+      chat: { id: 1, type: "private" },
+      date: 1,
+      photo: [
+        { file_id: "id_large", file_unique_id: "u1", width: 1280, height: 720 },
+        { file_id: "id_small", file_unique_id: "u2", width: 320, height: 180 },
+      ],
+    })),
+    sendMediaGroup: vi.fn(async () => [
+      {
+        message_id: 1,
+        chat: { id: 1, type: "private" },
+        date: 1,
+        photo: [{ file_id: "id_1", file_unique_id: "u1", width: 800, height: 600 }],
+      },
+      {
+        message_id: 2,
+        chat: { id: 1, type: "private" },
+        date: 1,
+        photo: [{ file_id: "id_2", file_unique_id: "u2", width: 1024, height: 768 }],
+      },
     ]),
     streamImage: vi.fn(async () => ({
-      stream: new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.enqueue(new TextEncoder().encode("fake-image-bytes"));
-          controller.close();
-        },
-      }),
+      buffer: new TextEncoder().encode("fake-image-bytes"),
       contentType: "image/png",
     })),
   },
@@ -59,11 +73,28 @@ describe("POST /api/images/upload", () => {
     expect(res.body.success).toBe(true);
     expect(res.body.data.fileId).toBe("id_large");
   });
+
+  it("uploads multiple valid images and returns file ids (200)", async () => {
+    const res = await request(app)
+      .post("/api/images/upload")
+      .set("x-api-key", "dev_api_key")
+      .attach("images", Buffer.from(PNG_1X1, "base64"), {
+        filename: "pixel1.png",
+        contentType: "image/png",
+      })
+      .attach("images", Buffer.from(PNG_1X1, "base64"), {
+        filename: "pixel2.png",
+        contentType: "image/png",
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.fileIds).toEqual(["id_1", "id_2"]);
+  });
 });
 
-describe("GET /api/images/:id", () => {
+describe("GET /images/:id", () => {
   it("streams the stored image back (200, image content-type)", async () => {
-    const res = await request(app).get("/api/images/abc123");
+    const res = await request(app).get("/images/abc123");
     expect(res.status).toBe(200);
     expect(res.headers["content-type"]).toContain("image/png");
     expect(res.body.toString()).toBe("fake-image-bytes");
