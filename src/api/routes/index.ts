@@ -1,6 +1,5 @@
 import { Router } from "express";
 import healthRouter from "./health.route";
-import exampleRouter from "./example.route";
 import imageRouter from "./image.route";
 
 /**
@@ -11,7 +10,6 @@ export function registerRoutes(apiPrefix: string): Router {
   const router = Router();
 
   router.use("/health", healthRouter);
-  router.use("/example", exampleRouter);
   router.use("/images", imageRouter);
 
   // Convenience alias so `GET /api` also answers the health check.
