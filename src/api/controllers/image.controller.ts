@@ -37,7 +37,11 @@ export async function uploadImage(req: Request, res: Response, next: NextFunctio
         contentType: file.mimetype,
       });
       const photos = sortPhotosByWidthDesc(message.photo ?? []);
-      httpResponse.ok(res, { fileId: photos[0]?.file_id, photos }, "Image uploaded");
+      httpResponse.ok(
+        res,
+        { fileId: photos[0]?.file_id, fileIds: [photos[0]?.file_id], photos },
+        "Image uploaded",
+      );
       return;
     }
 
