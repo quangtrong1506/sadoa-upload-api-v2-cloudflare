@@ -10,11 +10,26 @@ import {
   readImageCache,
   writeImageCache,
 } from "../../utils/image-cache";
+import type { IFileBase } from "../../types";
 
 type RequestWithFiles = Request & { uploadedFiles?: UploadedFile[] };
 
-function sortPhotosByWidthDesc<T extends { width: number }>(photos: T[]): T[] {
-  return [...photos].sort((a, b) => b.width - a.width);
+function sortPhotosByWidthAsc<T extends { width: number }>(photos: T[]): T[] {
+  return [...photos].sort((a, b) => a.width - b.width);
+}
+
+function mapPhotoToBase(photo: {
+  file_id: string;
+  width?: number;
+  height?: number;
+  file_size?: number;
+}): IFileBase {
+  return {
+    id: photo.file_id,
+    width: photo.width,
+    height: photo.height,
+    file_size: photo.file_size,
+  };
 }
 
 /**
@@ -42,12 +57,8 @@ export async function uploadImage(req: Request, res: Response, next: NextFunctio
         filename: file.originalname,
         contentType: file.mimetype,
       });
-      const photos = sortPhotosByWidthDesc(message.photo ?? []);
-      httpResponse.ok(
-        res,
-        { fileId: photos[0]?.file_id, fileIds: [photos[0]?.file_id], photos },
-        "Image uploaded",
-      );
+      const photos = sortPhotosByWidthAsc(message.photo ?? []).map(mapPhotoToBase);
+      httpResponse.ok(res, { photos: [photos] }, "Image uploaded");
       return;
     }
 
@@ -62,10 +73,9 @@ export async function uploadImage(req: Request, res: Response, next: NextFunctio
     }));
 
     const messages = await telegramService.sendMediaGroup(chatId, media);
-    const fileIds = messages.map((m) => m.photo?.[0]?.file_id).filter(Boolean) as string[];
-    const photos = messages.flatMap((m) => m.photo ?? []);
+    const photos = messages.map((m) => sortPhotosByWidthAsc(m.photo ?? []).map(mapPhotoToBase));
 
-    httpResponse.ok(res, { fileIds, photos }, "Images uploaded");
+    httpResponse.ok(res, { photos }, "Images uploaded");
   } catch (error) {
     next(error);
   }

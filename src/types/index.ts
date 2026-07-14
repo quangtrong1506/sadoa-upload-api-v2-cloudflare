@@ -12,3 +12,11 @@ export type AsyncRequestHandler = (
   res: Response,
   next: NextFunction,
 ) => Promise<void> | void;
+
+export interface IFileBase {
+  id: string;
+  url?: string;
+  file_size?: number;
+  width?: number;
+  height?: number;
+}

@@ -1,6 +1,6 @@
 import { logger } from "./logger";
 
-export const IMAGE_CACHE_TTL = 60 * 60 * 24 * 365;
+export const IMAGE_CACHE_TTL = 60 * 60 * 24 * 30;
 
 export const IMAGE_CACHE_CONTROL = `public, max-age=${IMAGE_CACHE_TTL}, s-maxage=${IMAGE_CACHE_TTL}, stale-while-revalidate=86400`;
 

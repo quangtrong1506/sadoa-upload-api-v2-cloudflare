@@ -216,15 +216,16 @@ export const openApiDocument: OpenApiDocument = {
       },
       Photo: {
         type: "object",
-        description: "Telegram photo variant with dimensions",
+        description: "Base file information shared across upload responses",
         properties: {
-          file_id: {
+          id: {
             type: "string",
             example: "AgACAgQAAxkBAAIBc2e...",
           },
-          file_unique_id: {
+          url: {
             type: "string",
-            example: "AQADz4y_xxQ",
+            nullable: true,
+            example: "https://api.telegram.org/file/bot...",
           },
           width: {
             type: "integer",
@@ -236,45 +237,43 @@ export const openApiDocument: OpenApiDocument = {
           },
           file_size: {
             type: "integer",
+            nullable: true,
             example: 45000,
           },
         },
-        required: ["file_id", "file_unique_id", "width", "height"],
+        required: ["id"],
       },
       UploadImageData: {
         type: "object",
         description: "Response data for single image upload",
         properties: {
-          fileId: {
-            type: "string",
-            description: "Telegram file ID of the uploaded image",
-            example: "AgACAgQAAxkBAAIBc2e...",
-          },
           photos: {
             type: "array",
-            items: { $ref: "#/components/schemas/Photo" },
-            description: "Available photo size variants",
+            items: {
+              type: "array",
+              items: { $ref: "#/components/schemas/Photo" },
+            },
+            description:
+              "Photo size variants for the uploaded file, sorted from smallest to largest",
           },
         },
-        required: ["fileId", "photos"],
+        required: ["photos"],
       },
       UploadImagesData: {
         type: "object",
         description: "Response data for multiple image upload",
         properties: {
-          fileIds: {
-            type: "array",
-            items: { type: "string" },
-            description: "Telegram file IDs of the uploaded images",
-            example: ["AgACAgQAAxkBAAIBc2e...", "AgACAgQAAxkBAAIBdGe..."],
-          },
           photos: {
             type: "array",
-            items: { $ref: "#/components/schemas/Photo" },
-            description: "All photo size variants across all uploaded images",
+            items: {
+              type: "array",
+              items: { $ref: "#/components/schemas/Photo" },
+            },
+            description:
+              "Photo size variants grouped by uploaded file, each group sorted from smallest to largest",
           },
         },
-        required: ["fileIds", "photos"],
+        required: ["photos"],
       },
       ExampleData: {
         type: "object",
@@ -459,15 +458,29 @@ export const openApiDocument: OpenApiDocument = {
                   success: true,
                   message: "Images uploaded",
                   data: {
-                    fileIds: ["AgACAgQAAxkBAAIBc2e...", "AgACAgQAAxkBAAIBdGe..."],
                     photos: [
-                      {
-                        file_id: "AgACAgQAAxkBAAIBc2e...",
-                        file_unique_id: "AQADz4y_xxQ",
-                        width: 1280,
-                        height: 720,
-                        file_size: 45000,
-                      },
+                      [
+                        {
+                          id: "AgACAgQAAxkBAAIBc2e...",
+                          width: 320,
+                          height: 240,
+                          file_size: 45000,
+                        },
+                        {
+                          id: "AgACAgQAAxkBAAIBc2e...",
+                          width: 1280,
+                          height: 720,
+                          file_size: 180000,
+                        },
+                      ],
+                      [
+                        {
+                          id: "AgACAgQAAxkBAAIBdGe...",
+                          width: 160,
+                          height: 120,
+                          file_size: 20000,
+                        },
+                      ],
                     ],
                   },
                 },
