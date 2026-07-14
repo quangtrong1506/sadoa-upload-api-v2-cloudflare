@@ -40,6 +40,8 @@ declare module "cloudflare:workers" {
   export const caches: CacheStorage;
 }
 
+declare const caches: CacheStorage;
+
 declare module "cloudflare:node" {
   import type { Server } from "node:http";
   import type { ExportedHandlerFetchHandler } from "@cloudflare/workers-types";

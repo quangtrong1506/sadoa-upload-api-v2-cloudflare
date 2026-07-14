@@ -4,6 +4,12 @@ import { telegramService } from "../../services/telegram";
 import { AppError } from "../../utils/app-error";
 import type { UploadedFile } from "../middleware/upload.middleware";
 import { httpResponse } from "../responses";
+import {
+  IMAGE_CACHE_CONTROL,
+  buildCacheKey,
+  readImageCache,
+  writeImageCache,
+} from "../../utils/image-cache";
 
 type RequestWithFiles = Request & { uploadedFiles?: UploadedFile[] };
 
@@ -68,14 +74,39 @@ export async function uploadImage(req: Request, res: Response, next: NextFunctio
 /**
  * GET /images/:id
  * Streams the stored image bytes back to the client with long cache headers.
+ * Cache is an optimization only: failures never surface to the client.
  */
 export async function getImage(req: Request, res: Response, next: NextFunction): Promise<void> {
-  try {
-    const { id } = req.params;
-    const { buffer, contentType } = await telegramService.streamImage(id as string);
+  const { id } = req.params;
+  const protocol = req.secure ? "https" : req.protocol;
+  const host = req.get("host");
+  const cacheKey = buildCacheKey(`${protocol}://${host}${req.originalUrl}`);
+
+  const cached = await readImageCache(cacheKey);
+  if (cached) {
+    const body = Buffer.from(await cached.arrayBuffer());
+    const contentType = cached.headers.get("Content-Type") ?? "application/octet-stream";
     res.setHeader("Content-Type", contentType);
-    res.setHeader("Cache-Control", "public, max-age=31536000");
+    res.setHeader("Cache-Control", IMAGE_CACHE_CONTROL);
+    res.send(body);
+    return;
+  }
+
+  try {
+    const { buffer, contentType } = await telegramService.streamImage(id as string);
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", IMAGE_CACHE_CONTROL);
     res.send(Buffer.from(buffer));
+
+    const responseToCache = new Response(buffer, {
+      headers: {
+        "Content-Type": contentType,
+        "Cache-Control": IMAGE_CACHE_CONTROL,
+      },
+    });
+
+    void writeImageCache(cacheKey, responseToCache);
   } catch (error) {
     next(error);
   }
