@@ -1,4 +1,4 @@
-import { Api, InputFile } from "grammy";
+import { Api, InputFile, GrammyError, HttpError } from "grammy";
 import {
   type TelegramSendPhotoFileOptions,
   type TelegramSendDocumentFileOptions,
@@ -40,17 +40,19 @@ export class TelegramService {
   /**
    * Send a text message to a chat.
    */
-  sendMessage(
+  async sendMessage(
     chatId: string | number,
     text: string,
     options?: TelegramSendMessageOptions,
   ): Promise<TelegramMessage> {
     try {
-      return this.api.sendMessage(chatId, text, options) as unknown as Promise<TelegramMessage>;
+      return (await this.api.sendMessage(
+        chatId,
+        text,
+        options,
+      )) as unknown as Promise<TelegramMessage>;
     } catch (error) {
-      throw new Error(
-        `Failed to send Telegram message: ${error instanceof Error ? error.message : "Unknown error"}`,
-      );
+      return mapTelegramError(error);
     }
   }
 
@@ -63,7 +65,7 @@ export class TelegramService {
    * @param fileOptions - Optional file metadata (filename, content type).
    * @returns The sent {@link TelegramMessage}.
    */
-  sendPhoto(
+  async sendPhoto(
     chatId: string | number,
     photo: string | Buffer,
     options?: TelegramSendPhotoOptions,
@@ -71,11 +73,9 @@ export class TelegramService {
   ): Promise<TelegramMessage> {
     try {
       const input = toInputFile(photo, fileOptions?.filename ?? "photo");
-      return this.api.sendPhoto(chatId, input, options) as unknown as Promise<TelegramMessage>;
+      return (await this.api.sendPhoto(chatId, input, options)) as unknown as TelegramMessage;
     } catch (error) {
-      throw new Error(
-        `Failed to send Telegram photo: ${error instanceof Error ? error.message : "Unknown error"}`,
-      );
+      return mapTelegramError(error);
     }
   }
 
@@ -90,7 +90,7 @@ export class TelegramService {
    * @param options - Optional send parameters.
    * @returns Array of sent {@link TelegramMessage} objects.
    */
-  sendMediaGroup(
+  async sendMediaGroup(
     chatId: string | number,
     media: TelegramInputMedia[],
     options?: TelegramSendMediaGroupOptions,
@@ -100,22 +100,20 @@ export class TelegramService {
         ...item,
         media: toInputFile(item.media, "file"),
       }));
-      return this.api.sendMediaGroup(
+      return (await this.api.sendMediaGroup(
         chatId,
         grammyMedia as Parameters<typeof this.api.sendMediaGroup>[1],
         options,
-      ) as unknown as Promise<TelegramMediaGroup>;
+      )) as unknown as TelegramMediaGroup;
     } catch (error) {
-      throw new Error(
-        `Failed to send Telegram media group: ${error instanceof Error ? error.message : "Unknown error"}`,
-      );
+      return mapTelegramError(error);
     }
   }
 
   /**
    * Send a document to a chat.
    */
-  sendDocument(
+  async sendDocument(
     chatId: string | number,
     document: string | Buffer,
     options?: TelegramSendDocumentOptions,
@@ -123,18 +121,16 @@ export class TelegramService {
   ): Promise<TelegramMessage> {
     try {
       const input = toInputFile(document, fileOptions?.filename ?? "document");
-      return this.api.sendDocument(chatId, input, options) as unknown as Promise<TelegramMessage>;
+      return (await this.api.sendDocument(chatId, input, options)) as unknown as TelegramMessage;
     } catch (error) {
-      throw new Error(
-        `Failed to send Telegram document: ${error instanceof Error ? error.message : "Unknown error"}`,
-      );
+      return mapTelegramError(error);
     }
   }
 
   /**
    * Send a video to a chat.
    */
-  sendVideo(
+  async sendVideo(
     chatId: string | number,
     video: string | Buffer,
     options?: TelegramSendVideoOptions,
@@ -142,40 +138,34 @@ export class TelegramService {
   ): Promise<TelegramMessage> {
     try {
       const input = toInputFile(video, fileOptions?.filename ?? "video");
-      return this.api.sendVideo(chatId, input, options) as unknown as Promise<TelegramMessage>;
+      return (await this.api.sendVideo(chatId, input, options)) as unknown as TelegramMessage;
     } catch (error) {
-      throw new Error(
-        `Failed to send Telegram video: ${error instanceof Error ? error.message : "Unknown error"}`,
-      );
+      return mapTelegramError(error);
     }
   }
 
   /**
    * Send a chat action to indicate bot activity (e.g. typing, uploading photo).
    */
-  sendChatAction(chatId: string | number, action: TelegramChatAction): Promise<boolean> {
+  async sendChatAction(chatId: string | number, action: TelegramChatAction): Promise<boolean> {
     try {
-      return this.api.sendChatAction(
+      return await this.api.sendChatAction(
         chatId,
         action as Parameters<typeof this.api.sendChatAction>[1],
       );
     } catch (error) {
-      throw new Error(
-        `Failed to send Telegram chat action: ${error instanceof Error ? error.message : "Unknown error"}`,
-      );
+      return mapTelegramError(error);
     }
   }
 
   /**
    * Delete a message from a chat.
    */
-  deleteMessage(chatId: string | number, messageId: number): Promise<boolean> {
+  async deleteMessage(chatId: string | number, messageId: number): Promise<boolean> {
     try {
-      return this.api.deleteMessage(chatId, messageId);
+      return await this.api.deleteMessage(chatId, messageId);
     } catch (error) {
-      throw new Error(
-        `Failed to delete Telegram message: ${error instanceof Error ? error.message : "Unknown error"}`,
-      );
+      return mapTelegramError(error);
     }
   }
 
@@ -194,9 +184,7 @@ export class TelegramService {
       }
       return file.file_path;
     } catch (error) {
-      throw new Error(
-        `Failed to get Telegram file path: ${error instanceof Error ? error.message : "Unknown error"}`,
-      );
+      return mapTelegramError(error);
     }
   }
 
@@ -222,9 +210,7 @@ export class TelegramService {
         contentType: this.getContentType(filePath),
       };
     } catch (error) {
-      throw new Error(
-        `Failed to stream Telegram image: ${error instanceof Error ? error.message : "Unknown error"}`,
-      );
+      return mapTelegramError(error);
     }
   }
 
@@ -245,6 +231,45 @@ export class TelegramService {
     };
     return types[ext] ?? "application/octet-stream";
   }
+}
+
+/**
+ * Map a Telegram/grammy error onto an {@link AppError}.
+ *
+ * Telegram rate limits (HTTP 429) are surfaced to the client as a 429 response
+ * carrying the `retry_after` hint from Telegram, instead of leaking a generic
+ * 500. Other upstream Telegram faults become 502 (bad gateway). Anything that
+ * is not a known Telegram error is re-wrapped as a 500 so the global error
+ * handler still produces a structured body.
+ *
+ * This helper always throws; it exists only to centralize the mapping.
+ */
+function mapTelegramError(error: unknown): never {
+  if (error instanceof GrammyError) {
+    if (error.error_code === 429) {
+      const retryAfter = error.parameters?.retry_after;
+      throw new AppError(
+        429,
+        "Telegram rate limit reached. Please retry later.",
+        retryAfter !== undefined ? { retry_after: retryAfter } : undefined,
+      );
+    }
+
+    throw new AppError(
+      502,
+      `Telegram error (${error.error_code}): ${error.description || "unknown error"}`,
+      { method: error.method, error_code: error.error_code },
+    );
+  }
+
+  if (error instanceof HttpError) {
+    throw new AppError(502, "Failed to communicate with Telegram");
+  }
+
+  throw new AppError(
+    500,
+    `Telegram request failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+  );
 }
 
 /**
