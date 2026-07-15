@@ -1,13 +1,9 @@
 import type { NextFunction, Request, Response } from "express";
 import { AppError } from "../../utils/app-error";
 
-// Workers have a 128 MB memory ceiling and no disk — keep uploads modest.
 const MAX_FILE_SIZE = 3 * 1024 * 1024; // 3 MB
 const MAX_FILES = 10;
 
-/**
- * Shape of a single parsed upload, attached to `req.uploadedFiles` for controllers.
- */
 export interface UploadedFile {
   buffer: Buffer;
   originalname: string;
@@ -17,54 +13,94 @@ export interface UploadedFile {
 
 type RequestWithFiles = Request & { uploadedFiles?: UploadedFile[] };
 
-/**
- * Multer-free multipart parser.
- *
- * Supports both single `image` and multiple `images[]` fields.
- * Normalizes the result into an array of UploadedFile objects.
- */
+interface CloudflareNativeRequest extends Request {
+  formData(): Promise<FormData>;
+}
+
+interface CloudflareRequest extends Request {
+  raw?: CloudflareNativeRequest;
+}
+
+function isCloudflareRequest(req: Request): req is CloudflareRequest {
+  return "raw" in req && req.raw !== undefined;
+}
+
+async function parseMultipartNative(req: CloudflareRequest): Promise<File[]> {
+  const nativeRequest = req.raw!;
+  const form = await nativeRequest.formData();
+
+  const files: File[] = [];
+  const singleFile = form.get("image");
+  const multiFiles = form.getAll("images");
+
+  if (singleFile && typeof singleFile !== "string") {
+    files.push(singleFile);
+  }
+
+  for (const file of multiFiles) {
+    if (typeof file !== "string") {
+      files.push(file);
+    }
+  }
+
+  return files;
+}
+
+async function parseMultipartFallback(req: Request): Promise<File[]> {
+  const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (typeof value === "string") {
+      headers.set(key, value);
+    } else if (Array.isArray(value) && value.length > 0) {
+      headers.set(key, value.join(", "));
+    }
+  }
+
+  const webRequest = new Request(url, {
+    method: req.method,
+    headers,
+    body: new ReadableStream({
+      async start(controller) {
+        for await (const chunk of req) {
+          controller.enqueue(chunk as Uint8Array);
+        }
+        controller.close();
+      },
+    }),
+  });
+
+  const form = await webRequest.formData();
+
+  const files: File[] = [];
+  const singleFile = form.get("image");
+  const multiFiles = form.getAll("images");
+
+  if (singleFile && typeof singleFile !== "string") {
+    files.push(singleFile);
+  }
+
+  for (const file of multiFiles) {
+    if (typeof file !== "string") {
+      files.push(file);
+    }
+  }
+
+  return files;
+}
+
 export async function uploadMiddleware(
   req: Request,
   _res: Response,
   next: NextFunction,
 ): Promise<void> {
   try {
-    const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
-    const headers = new Headers();
-    for (const [key, value] of Object.entries(req.headers)) {
-      if (typeof value === "string") {
-        headers.set(key, value);
-      } else if (Array.isArray(value) && value.length > 0) {
-        headers.set(key, value.join(", "));
-      }
-    }
+    let files: File[];
 
-    const chunks: Uint8Array[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk as Uint8Array);
-    }
-
-    const webRequest = new Request(url, {
-      method: req.method,
-      headers,
-      body: Buffer.concat(chunks),
-    });
-
-    const form = await webRequest.formData();
-
-    const singleFile = form.get("image");
-    const multiFiles = form.getAll("images");
-
-    const files: File[] = [];
-
-    if (singleFile && typeof singleFile !== "string") {
-      files.push(singleFile);
-    }
-
-    for (const file of multiFiles) {
-      if (typeof file !== "string") {
-        files.push(file);
-      }
+    if (isCloudflareRequest(req)) {
+      files = await parseMultipartNative(req);
+    } else {
+      files = await parseMultipartFallback(req);
     }
 
     if (files.length === 0) {
@@ -88,7 +124,8 @@ export async function uploadMiddleware(
         return;
       }
 
-      const buffer = Buffer.from(await file.arrayBuffer());
+      const arrayBuffer = await file.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
       uploadedFiles.push({
         buffer,
         originalname: file.name,

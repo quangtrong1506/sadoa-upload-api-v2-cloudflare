@@ -1,289 +1,274 @@
-import { Api, InputFile, GrammyError, HttpError } from "grammy";
-import {
-  type TelegramSendPhotoFileOptions,
-  type TelegramSendDocumentFileOptions,
-  type TelegramSendVideoFileOptions,
-} from "./telegram.types";
 import { AppError } from "../../utils/app-error";
-import {
-  type TelegramMessage,
-  type TelegramMediaGroup,
-  type TelegramChatAction,
-  type TelegramSendMessageOptions,
-  type TelegramSendPhotoOptions,
-  type TelegramSendDocumentOptions,
-  type TelegramSendVideoOptions,
-  type TelegramSendMediaGroupOptions,
-  type TelegramInputMedia,
-} from "./telegram.types";
 
-/**
- * Wraps the Telegram Bot API for the image store.
- *
- * Uses grammy, whose `Api` client is built on the web `fetch` + `FormData`
- * primitives and is designed to run on Cloudflare Workers (unlike the
- * `request`-based clients that fail to upload files at the edge).
- */
+interface TelegramResponse<T> {
+  ok: boolean;
+  result?: T;
+  error_code?: number;
+  description?: string;
+  parameters?: { retry_after?: number };
+}
+
+interface TelegramFile {
+  file_id: string;
+  file_unique_id: string;
+  file_size?: number;
+  file_path?: string;
+}
+
+interface TelegramMessage {
+  message_id: number;
+  photo?: Array<{ file_id: string; file_unique_id: string; width: number; height: number; file_size?: number }>;
+  [key: string]: unknown;
+}
+
+type TelegramMediaGroup = TelegramMessage[];
+
+export interface TelegramServiceOptions {
+  token: string;
+}
+
+export interface SendMessageOptions {
+  chat_id: string | number;
+  text: string;
+  parse_mode?: string;
+  disable_web_page_preview?: boolean;
+  reply_to_message_id?: number;
+  reply_markup?: unknown;
+}
+
+export interface SendPhotoOptions {
+  chat_id: string | number;
+  photo: string | Buffer;
+  caption?: string;
+  parse_mode?: string;
+  reply_to_message_id?: number;
+  reply_markup?: unknown;
+  filename?: string;
+  contentType?: string;
+}
+
+export interface SendDocumentOptions {
+  chat_id: string | number;
+  document: string | Buffer;
+  caption?: string;
+  parse_mode?: string;
+  reply_to_message_id?: number;
+  reply_markup?: unknown;
+  filename?: string;
+  contentType?: string;
+}
+
+export interface SendVideoOptions {
+  chat_id: string | number;
+  video: string | Buffer;
+  caption?: string;
+  parse_mode?: string;
+  reply_to_message_id?: number;
+  reply_markup?: unknown;
+  filename?: string;
+  contentType?: string;
+}
+
+export interface SendMediaGroupOptions {
+  chat_id: string | number;
+  media: Array<{
+    type: string;
+    media: string | Buffer;
+    caption?: string;
+    parse_mode?: string;
+    filename?: string;
+    contentType?: string;
+  }>;
+  reply_to_message_id?: number;
+}
+
+export interface SendChatActionOptions {
+  chat_id: string | number;
+  action: string;
+}
+
+export interface DeleteMessageOptions {
+  chat_id: string | number;
+  message_id: number;
+}
+
+export interface GetFileOptions {
+  file_id: string;
+}
+
 export class TelegramService {
-  private readonly api: Api;
   private readonly token: string;
 
-  constructor(botToken: string) {
-    if (!botToken) {
-      throw AppError.internal("TELEGRAM_BOT_TOKEN is required to initialize TelegramService");
-    }
-
-    this.token = botToken;
-    this.api = new Api(botToken);
+  private get apiUrl(): string {
+    return `https://api.telegram.org/bot${this.token}`;
   }
 
-  /**
-   * Send a text message to a chat.
-   */
-  async sendMessage(
-    chatId: string | number,
-    text: string,
-    options?: TelegramSendMessageOptions,
-  ): Promise<TelegramMessage> {
-    try {
-      return (await this.api.sendMessage(
-        chatId,
-        text,
-        options,
-      )) as unknown as Promise<TelegramMessage>;
-    } catch (error) {
-      return mapTelegramError(error);
-    }
+  private get fileUrl(): string {
+    return `https://api.telegram.org/file/bot${this.token}`;
   }
 
-  /**
-   * Send a photo to a chat.
-   *
-   * @param chatId - Target chat identifier.
-   * @param photo - File ID, URL, or raw Buffer.
-   * @param options - Optional send parameters (caption, parse mode, etc.).
-   * @param fileOptions - Optional file metadata (filename, content type).
-   * @returns The sent {@link TelegramMessage}.
-   */
-  async sendPhoto(
-    chatId: string | number,
-    photo: string | Buffer,
-    options?: TelegramSendPhotoOptions,
-    fileOptions?: TelegramSendPhotoFileOptions,
-  ): Promise<TelegramMessage> {
-    try {
-      const input = toInputFile(photo, fileOptions?.filename ?? "photo");
-      return (await this.api.sendPhoto(chatId, input, options)) as unknown as TelegramMessage;
-    } catch (error) {
-      return mapTelegramError(error);
-    }
+  constructor(token: string) {
+    this.token = token;
   }
 
-  /**
-   * Send a media group (album) to a chat.
-   *
-   * Raw {@link Buffer} media items are wrapped in {@link InputFile} so the
-   * request is sent via fetch + FormData (Workers-compatible).
-   *
-   * @param chatId - Target chat identifier.
-   * @param media - Array of media items (photos, videos, documents, audio).
-   * @param options - Optional send parameters.
-   * @returns Array of sent {@link TelegramMessage} objects.
-   */
-  async sendMediaGroup(
-    chatId: string | number,
-    media: TelegramInputMedia[],
-    options?: TelegramSendMediaGroupOptions,
-  ): Promise<TelegramMediaGroup> {
-    try {
-      const grammyMedia = media.map((item) => ({
-        ...item,
-        media: toInputFile(item.media, "file"),
-      }));
-      return (await this.api.sendMediaGroup(
-        chatId,
-        grammyMedia as Parameters<typeof this.api.sendMediaGroup>[1],
-        options,
-      )) as unknown as TelegramMediaGroup;
-    } catch (error) {
-      return mapTelegramError(error);
-    }
-  }
+  private async request<T>(method: string, body?: FormData | Record<string, unknown>): Promise<T> {
+    const init: RequestInit = { method: "POST" };
 
-  /**
-   * Send a document to a chat.
-   */
-  async sendDocument(
-    chatId: string | number,
-    document: string | Buffer,
-    options?: TelegramSendDocumentOptions,
-    fileOptions?: TelegramSendDocumentFileOptions,
-  ): Promise<TelegramMessage> {
-    try {
-      const input = toInputFile(document, fileOptions?.filename ?? "document");
-      return (await this.api.sendDocument(chatId, input, options)) as unknown as TelegramMessage;
-    } catch (error) {
-      return mapTelegramError(error);
+    if (body instanceof FormData) {
+      init.body = body;
+    } else if (body) {
+      init.headers = { "Content-Type": "application/json" };
+      init.body = JSON.stringify(body);
     }
-  }
 
-  /**
-   * Send a video to a chat.
-   */
-  async sendVideo(
-    chatId: string | number,
-    video: string | Buffer,
-    options?: TelegramSendVideoOptions,
-    fileOptions?: TelegramSendVideoFileOptions,
-  ): Promise<TelegramMessage> {
-    try {
-      const input = toInputFile(video, fileOptions?.filename ?? "video");
-      return (await this.api.sendVideo(chatId, input, options)) as unknown as TelegramMessage;
-    } catch (error) {
-      return mapTelegramError(error);
-    }
-  }
+    const response = await fetch(`${this.apiUrl}/${method}`, init);
+    const data = (await response.json()) as TelegramResponse<T>;
 
-  /**
-   * Send a chat action to indicate bot activity (e.g. typing, uploading photo).
-   */
-  async sendChatAction(chatId: string | number, action: TelegramChatAction): Promise<boolean> {
-    try {
-      return await this.api.sendChatAction(
-        chatId,
-        action as Parameters<typeof this.api.sendChatAction>[1],
-      );
-    } catch (error) {
-      return mapTelegramError(error);
-    }
-  }
-
-  /**
-   * Delete a message from a chat.
-   */
-  async deleteMessage(chatId: string | number, messageId: number): Promise<boolean> {
-    try {
-      return await this.api.deleteMessage(chatId, messageId);
-    } catch (error) {
-      return mapTelegramError(error);
-    }
-  }
-
-  /**
-   * Retrieve the file path for a given Telegram file_id.
-   *
-   * @param fileId - Telegram file identifier.
-   * @returns Remote file path usable with the Telegram file download endpoint.
-   * @throws {Error} If the Telegram API request fails or file is not found.
-   */
-  async getFilePath(fileId: string): Promise<string> {
-    try {
-      const file = await this.api.getFile(fileId);
-      if (!file.file_path) {
-        throw new Error("Telegram file_path is missing");
+    if (!data.ok) {
+      if (data.error_code === 429) {
+        const retryAfter = data.parameters?.retry_after;
+        throw new AppError(
+          429,
+          "Telegram rate limit reached. Please retry later.",
+          retryAfter !== undefined ? { retry_after: retryAfter } : undefined,
+        );
       }
-      return file.file_path;
-    } catch (error) {
-      return mapTelegramError(error);
-    }
-  }
-
-  /**
-   * Download the raw bytes of a stored Telegram file.
-   *
-   * @param fileId - Telegram file identifier.
-   * @returns A {@link Uint8Array} of file bytes and its content type.
-   * @throws {Error} If the Telegram API request fails.
-   */
-  async streamImage(fileId: string): Promise<{ buffer: Uint8Array; contentType: string }> {
-    try {
-      const filePath = await this.getFilePath(fileId);
-      const response = await fetch(`https://api.telegram.org/file/bot${this.token}/${filePath}`);
-
-      if (!response.ok) {
-        throw new Error("Failed to fetch Telegram file");
-      }
-
-      const buffer = new Uint8Array(await response.arrayBuffer());
-      return {
-        buffer,
-        contentType: this.getContentType(filePath),
-      };
-    } catch (error) {
-      return mapTelegramError(error);
-    }
-  }
-
-  /**
-   * Guess the MIME type from a Telegram file path extension.
-   *
-   * @param filePath - Remote file path returned by Telegram.
-   * @returns MIME type string.
-   */
-  getContentType(filePath: string): string {
-    const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
-    const types: Record<string, string> = {
-      jpg: "image/jpeg",
-      jpeg: "image/jpeg",
-      png: "image/png",
-      webp: "image/webp",
-      gif: "image/gif",
-    };
-    return types[ext] ?? "application/octet-stream";
-  }
-}
-
-/**
- * Map a Telegram/grammy error onto an {@link AppError}.
- *
- * Telegram rate limits (HTTP 429) are surfaced to the client as a 429 response
- * carrying the `retry_after` hint from Telegram, instead of leaking a generic
- * 500. Other upstream Telegram faults become 502 (bad gateway). Anything that
- * is not a known Telegram error is re-wrapped as a 500 so the global error
- * handler still produces a structured body.
- *
- * This helper always throws; it exists only to centralize the mapping.
- */
-function mapTelegramError(error: unknown): never {
-  if (error instanceof GrammyError) {
-    if (error.error_code === 429) {
-      const retryAfter = error.parameters?.retry_after;
       throw new AppError(
-        429,
-        "Telegram rate limit reached. Please retry later.",
-        retryAfter !== undefined ? { retry_after: retryAfter } : undefined,
+        502,
+        `Telegram error (${data.error_code}): ${data.description || "unknown error"}`,
       );
     }
 
-    throw new AppError(
-      502,
-      `Telegram error (${error.error_code}): ${error.description || "unknown error"}`,
-      { method: error.method, error_code: error.error_code },
-    );
+    return data.result as T;
   }
 
-  if (error instanceof HttpError) {
-    throw new AppError(502, "Failed to communicate with Telegram");
+  private createFormData(data: Record<string, unknown>, files: Record<string, { value: Buffer; filename: string; contentType?: string }>): FormData {
+    const form = new FormData();
+
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== undefined) {
+        form.append(key, String(value));
+      }
+    }
+
+    for (const [key, file] of Object.entries(files)) {
+      form.append(key, new Blob([file.value], { type: file.contentType || "application/octet-stream" }), file.filename);
+    }
+
+    return form;
   }
 
-  throw new AppError(
-    500,
-    `Telegram request failed: ${error instanceof Error ? error.message : "Unknown error"}`,
-  );
-}
+  async sendMessage(options: SendMessageOptions): Promise<TelegramMessage> {
+    return this.request<TelegramMessage>("sendMessage", options as unknown as Record<string, unknown>);
+  }
 
-/**
- * Normalize a Telegram input source into a grammy {@link InputFile}.
- *
- * `string` values are passed through unchanged (file_id or URL); `Buffer`
- * values are wrapped so grammy can upload them via FormData.
- */
-function toInputFile(media: string | Buffer | InputFile, fallbackName: string): string | InputFile {
-  if (typeof media === "string") {
-    return media;
+  async sendPhoto(options: SendPhotoOptions): Promise<TelegramMessage> {
+    const { photo, filename, contentType, ...rest } = options;
+
+    if (typeof photo === "string") {
+      return this.request<TelegramMessage>("sendPhoto", { ...rest, photo } as unknown as Record<string, unknown>);
+    }
+
+    const form = this.createFormData(rest as unknown as Record<string, unknown>, {
+      photo: { value: photo, filename: filename ?? "photo.jpg", contentType: contentType ?? "image/jpeg" },
+    });
+
+    return this.request<TelegramMessage>("sendPhoto", form);
   }
-  if (media instanceof InputFile) {
-    return media;
+
+  async sendDocument(options: SendDocumentOptions): Promise<TelegramMessage> {
+    const { document, filename, contentType, ...rest } = options;
+
+    if (typeof document === "string") {
+      return this.request<TelegramMessage>("sendDocument", { ...rest, document } as unknown as Record<string, unknown>);
+    }
+
+    const form = this.createFormData(rest as unknown as Record<string, unknown>, {
+      document: { value: document, filename: filename ?? "document", contentType: contentType ?? "application/octet-stream" },
+    });
+
+    return this.request<TelegramMessage>("sendDocument", form);
   }
-  return new InputFile(media, fallbackName);
+
+  async sendVideo(options: SendVideoOptions): Promise<TelegramMessage> {
+    const { video, filename, contentType, ...rest } = options;
+
+    if (typeof video === "string") {
+      return this.request<TelegramMessage>("sendVideo", { ...rest, video } as unknown as Record<string, unknown>);
+    }
+
+    const form = this.createFormData(rest as unknown as Record<string, unknown>, {
+      video: { value: video, filename: filename ?? "video.mp4", contentType: contentType ?? "video/mp4" },
+    });
+
+    return this.request<TelegramMessage>("sendVideo", form);
+  }
+
+  async sendMediaGroup(options: SendMediaGroupOptions): Promise<TelegramMediaGroup> {
+    const form = new FormData();
+    const mediaPayload: Record<string, unknown>[] = [];
+
+    for (let i = 0; i < options.media.length; i++) {
+      const item = options.media[i];
+      const mediaItem: Record<string, unknown> = { type: item.type };
+
+      if (typeof item.media === "string") {
+        mediaItem.media = item.media;
+      } else {
+        const filename = item.filename ?? `file_${i}`;
+        const contentType = item.contentType ?? "application/octet-stream";
+        form.append(`media_${i}`, new Blob([item.media], { type: contentType }), filename);
+        mediaItem.media = `attach://media_${i}`;
+      }
+
+      if (item.caption) mediaItem.caption = item.caption;
+      if (item.parse_mode) mediaItem.parse_mode = item.parse_mode;
+
+      mediaPayload.push(mediaItem);
+    }
+
+    form.append("media", JSON.stringify(mediaPayload));
+
+    const entries = Object.entries(options).filter(([k]) => k !== "media");
+    for (let i = 0; i < entries.length; i++) {
+      const [key, value] = entries[i];
+      if (value !== undefined) {
+        form.append(key, String(value));
+      }
+    }
+
+    return this.request<TelegramMediaGroup>("sendMediaGroup", form);
+  }
+
+  async sendChatAction(options: SendChatActionOptions): Promise<boolean> {
+    return this.request<boolean>("sendChatAction", options as unknown as Record<string, unknown>);
+  }
+
+  async deleteMessage(options: DeleteMessageOptions): Promise<boolean> {
+    return this.request<boolean>("deleteMessage", options as unknown as Record<string, unknown>);
+  }
+
+  async getFile(options: GetFileOptions): Promise<TelegramFile> {
+    return this.request<TelegramFile>("getFile", options as unknown as Record<string, unknown>);
+  }
+
+  async getFilePath(fileId: string): Promise<string> {
+    const file = await this.getFile({ file_id: fileId });
+    if (!file.file_path) {
+      throw new AppError(502, "Telegram file_path is missing");
+    }
+    return file.file_path;
+  }
+
+  async streamImage(fileId: string): Promise<Response> {
+    const filePath = await this.getFilePath(fileId);
+    const response = await fetch(`${this.fileUrl}/${filePath}`);
+
+    if (!response.ok) {
+      throw new AppError(502, "Failed to fetch Telegram file");
+    }
+
+    return response;
+  }
+
 }

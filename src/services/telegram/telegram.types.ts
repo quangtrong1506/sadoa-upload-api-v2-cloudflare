@@ -1,5 +1,3 @@
-import type { InputFile } from "grammy";
-
 export interface TelegramPhotoSize {
   file_id: string;
   file_unique_id: string;
@@ -42,6 +40,6 @@ export interface TelegramSendVideoFileOptions {
 
 export type TelegramInputMedia = {
   type: string;
-  media: string | Buffer | InputFile;
+  media: string | Buffer;
   [key: string]: unknown;
 };

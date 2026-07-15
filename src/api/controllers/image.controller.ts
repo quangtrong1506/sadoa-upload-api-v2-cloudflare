@@ -53,7 +53,9 @@ export async function uploadImage(req: Request, res: Response, next: NextFunctio
 
     if (files.length === 1) {
       const file = files[0];
-      const message = await telegramService.sendPhoto(chatId, file.buffer, undefined, {
+      const message = await telegramService.sendPhoto({
+        chat_id: chatId,
+        photo: file.buffer,
         filename: file.originalname,
         contentType: file.mimetype,
       });
@@ -65,14 +67,14 @@ export async function uploadImage(req: Request, res: Response, next: NextFunctio
     const media = files.map((file) => ({
       type: "photo" as const,
       media: file.buffer,
-      caption: undefined,
-      parse_mode: undefined,
-      caption_entities: undefined,
-      show_caption_above_media: undefined,
-      has_spoiler: undefined,
+      filename: file.originalname,
+      contentType: file.mimetype,
     }));
 
-    const messages = await telegramService.sendMediaGroup(chatId, media);
+    const messages = await telegramService.sendMediaGroup({
+      chat_id: chatId,
+      media,
+    });
     const photos = messages.map((m) => sortPhotosByWidthAsc(m.photo ?? []).map(mapPhotoToBase));
 
     httpResponse.ok(res, { photos }, "Images uploaded");
@@ -103,11 +105,14 @@ export async function getImage(req: Request, res: Response, next: NextFunction):
   }
 
   try {
-    const { buffer, contentType } = await telegramService.streamImage(id as string);
+    const response = await telegramService.streamImage(id as string);
+    const contentType = response.headers.get("content-type") ?? "application/octet-stream";
 
     res.setHeader("Content-Type", contentType);
     res.setHeader("Cache-Control", IMAGE_CACHE_CONTROL);
-    res.send(Buffer.from(buffer));
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    res.send(buffer);
 
     const responseToCache = new Response(buffer, {
       headers: {
