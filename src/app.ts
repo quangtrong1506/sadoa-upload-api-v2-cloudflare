@@ -37,6 +37,7 @@ export function createApp(): Express {
   // gating inline scripts behind a per-request nonce.
   app.use(
     helmet({
+      crossOriginResourcePolicy: false,
       contentSecurityPolicy: {
         useDefaults: true,
         directives: {
