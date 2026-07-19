@@ -98,6 +98,7 @@ export interface GetFileOptions {
 
 export class TelegramService {
   private readonly token: string;
+  private readonly filePathCache = new Map<string, string>();
 
   private get apiUrl(): string {
     return `https://api.telegram.org/bot${this.token}`;
@@ -253,10 +254,15 @@ export class TelegramService {
   }
 
   async getFilePath(fileId: string): Promise<string> {
+    const cached = this.filePathCache.get(fileId);
+    if (cached) return cached;
+
     const file = await this.getFile({ file_id: fileId });
     if (!file.file_path) {
       throw new AppError(502, "Telegram file_path is missing");
     }
+
+    this.filePathCache.set(fileId, file.file_path);
     return file.file_path;
   }
 

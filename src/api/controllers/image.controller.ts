@@ -1,15 +1,11 @@
 import type { NextFunction, Request, Response } from "express";
+import { Readable } from "node:stream";
 import { getEnv } from "../../config/env";
 import { telegramService } from "../../services/telegram";
 import { AppError } from "../../utils/app-error";
 import type { UploadedFile } from "../middleware/upload.middleware";
 import { httpResponse } from "../responses";
-import {
-  IMAGE_CACHE_CONTROL,
-  buildCacheKey,
-  readImageCache,
-  writeImageCache,
-} from "../../utils/image-cache";
+import { IMAGE_CACHE_CONTROL } from "../../utils/image-cache";
 import type { IFileBase } from "../../types";
 
 type RequestWithFiles = Request & { uploadedFiles?: UploadedFile[] };
@@ -86,42 +82,33 @@ export async function uploadImage(req: Request, res: Response, next: NextFunctio
 /**
  * GET /images/:id
  * Streams the stored image bytes back to the client with long cache headers.
- * Cache is an optimization only: failures never surface to the client.
+ * Cache-Control lets browsers and Cloudflare edge cache the response.
  */
 export async function getImage(req: Request, res: Response, next: NextFunction): Promise<void> {
-  const { id } = req.params;
-  const protocol = req.secure ? "https" : req.protocol;
-  const host = req.get("host");
-  const cacheKey = buildCacheKey(`${protocol}://${host}${req.originalUrl}`);
-
-  const cached = await readImageCache(cacheKey);
-  if (cached) {
-    const body = Buffer.from(await cached.arrayBuffer());
-    const contentType = cached.headers.get("Content-Type") ?? "application/octet-stream";
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Cache-Control", IMAGE_CACHE_CONTROL);
-    res.send(body);
-    return;
-  }
-
   try {
+    const { id } = req.params;
     const response = await telegramService.streamImage(id as string);
     const contentType = response.headers.get("content-type") ?? "application/octet-stream";
 
     res.setHeader("Content-Type", contentType);
     res.setHeader("Cache-Control", IMAGE_CACHE_CONTROL);
 
+    if (response.body) {
+      const stream = Readable.fromWeb(response.body);
+      stream.on("error", (err) => {
+        try {
+          res.end();
+        } catch {
+          // ignore
+        }
+        next(err);
+      });
+      stream.pipe(res);
+      return;
+    }
+
     const buffer = Buffer.from(await response.arrayBuffer());
     res.send(buffer);
-
-    const responseToCache = new Response(buffer, {
-      headers: {
-        "Content-Type": contentType,
-        "Cache-Control": IMAGE_CACHE_CONTROL,
-      },
-    });
-
-    void writeImageCache(cacheKey, responseToCache);
   } catch (error) {
     next(error);
   }
